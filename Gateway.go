@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"net/http"
 	"strconv"
+	"io/ioutil"
 )
 
 const (
@@ -41,6 +42,7 @@ type response struct{
 type libHTTP struct{
 	requestUrl string
 	requestString string
+	rawResponse string
 	sync.RWMutex
 }
 
@@ -64,13 +66,13 @@ func (requestGateway *gateway) AddParameter(key string, value string) () {
 
 func (requestGateway *gateway) RequestString() (request string) {
 	requestGateway.RLock()
-	for keyValuePair := range requestGateway.requestParameters {
+	for _, keyValuePair := range requestGateway.requestParameters {
 		for key, value := range keyValuePair {
 			request += key + "=" + url.QueryEscape(value) + "&"
 		}
 	}
 	requestGateway.RUnlock()
-	return request[:-1]
+	return request[:len(request)-1]
 }
 
 
@@ -116,19 +118,18 @@ func (requestGateway *gateway) AddTranId(tranId string) () {
 	requestGateway.AddParameter("transaction_id", tranId)
 }
 
-func (requestGateway *gateway) Run() (parsedResponse response, err error) {
+func (requestGateway *gateway) Run() (parsedResponse *response, err error) {
 	requestGateway.RLock()
 	host := requestGateway.hostUrl
 	postURL := requestGateway.RequestString()
 	requestGateway.RUnlock()
 	httpInstance := libHTTP{}
 	httpInstance.Init(host, postURL)
-	response, err := httpInstance.Run()
+	rawResponse, err := httpInstance.Run()
 	if err == nil {
 		return
 	}
-	parsedResponse = response{}
-	return parsedResponse.Init(response.Body)
+	return parsedResponse.Init(rawResponse), err
 }
 
 func (httpSender *libHTTP) Init(urlString string, requestString string) () {
@@ -138,30 +139,42 @@ func (httpSender *libHTTP) Init(urlString string, requestString string) () {
 	httpSender.Unlock()
 }
 
-func (httpSender *libHTTP) Run() (*http.Response, error) {
+func (httpSender *libHTTP) Run() (string, error) {
 	httpSender.RLock()
 	apiUrl := httpSender.requestUrl
 	req := httpSender.requestString
 	httpSender.RUnlock()
 	u, err := url.ParseRequestURI(apiUrl)
 	if err != nil {
-		return
+		return "", err
 	}
 	client := &http.Client{}
 	r, err := http.NewRequest("POST", u.String(), bytes.NewBufferString(req))
 	if err != nil {
-		return
+		return "", err
 	}
 	r.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Add("Content-Length", strconv.Itoa(len(req)))
-	return client.Do(r)
+
+
+	response, err := client.Do(r)
+
+	defer r.Body.Close()
+	if response.StatusCode == 200 {
+		bodyBytes, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			return "", err
+		}
+		return string(bodyBytes), err
+	}
+	return "", err
 }
 
 func ( *response) Init(responseString string) (gatewayResponse *response) {
 	gatewayResponse.Lock()
 	gatewayResponse.responseList = make(map[string]string, 0)
 	pairs := strings.Split(responseString, "&")
-	for pair := range pairs {
+	for _, pair := range pairs {
 		npv := strings.Split(pair, "=")
 		gatewayResponse.responseList[npv[0]] = npv[1]
 	}
