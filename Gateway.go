@@ -28,7 +28,7 @@ const (
 	GATEWAY_URL_LIVE = "https://api.merchante-solutions.com/mes-api/tridentApi"
 )
 
-type gateway struct{
+type Transaction struct{
 	requestParameters []map[string]string
 	hostUrl string
 	sync.RWMutex
@@ -46,17 +46,18 @@ type libHTTP struct{
 	sync.RWMutex
 }
 
-var Request = gateway{}
-
-func (requestGateway *gateway) Init(gatewayUrl string, transactionType string) () {
+func (requestGateway *Transaction) Init(gatewayUrl string, transactionType string) () {
 	requestGateway.Lock()
 	requestGateway.requestParameters = make([]map[string]string, 0)
+	requestGateway.Unlock()
+
 	requestGateway.AddParameter("transaction_type", transactionType)
+	requestGateway.Lock()
 	requestGateway.hostUrl = gatewayUrl
 	requestGateway.Unlock()
 }
 
-func (requestGateway *gateway) AddParameter(key string, value string) () {
+func (requestGateway *Transaction) AddParameter(key string, value string) () {
 	requestGateway.Lock()
 	requestGateway.requestParameters = append(requestGateway.requestParameters, map[string]string{
 		key: value,
@@ -64,7 +65,7 @@ func (requestGateway *gateway) AddParameter(key string, value string) () {
 	requestGateway.Unlock()
 }
 
-func (requestGateway *gateway) RequestString() (request string) {
+func (requestGateway *Transaction) RequestString() (request string) {
 	requestGateway.RLock()
 	for _, keyValuePair := range requestGateway.requestParameters {
 		for key, value := range keyValuePair {
@@ -76,60 +77,62 @@ func (requestGateway *gateway) RequestString() (request string) {
 }
 
 
-func (requestGateway *gateway) HostUrl(gatewayUrl string) () {
+func (requestGateway *Transaction) HostUrl(gatewayUrl string) () {
 	requestGateway.Lock()
 	requestGateway.hostUrl = gatewayUrl
 	requestGateway.Unlock()
 }
 
-func (requestGateway *gateway) AddCredentials(profileId string, profileKey string) () {
+func (requestGateway *Transaction) AddCredentials(profileId string, profileKey string) () {
 	requestGateway.AddParameter("profile_id", profileId)
 	requestGateway.AddParameter("profile_key", profileKey)
 }
 
-func (requestGateway *gateway) AddCardData(cardNum string, expDate string) () {
+func (requestGateway *Transaction) AddCardData(cardNum string, expDate string) () {
 	requestGateway.AddParameter("card_number", cardNum)
 	requestGateway.AddParameter("card_exp_date", expDate)
 }
 
-func (requestGateway *gateway) AddTokenData(token string, expDate string) () {
+func (requestGateway *Transaction) AddTokenData(token string, expDate string) () {
 	requestGateway.AddParameter("card_id", token)
 	requestGateway.AddParameter("card_exp_date", expDate)
 }
 
-func (requestGateway *gateway) AddAVSData(address string, zipCode string) () {
+func (requestGateway *Transaction) AddAVSData(address string, zipCode string) () {
 	requestGateway.AddParameter("cardholder_street_address", address)
 	requestGateway.AddParameter("cardholder_zip", zipCode)
 }
 
-func (requestGateway *gateway) AddInvoice(invoice string) () {
+func (requestGateway *Transaction) AddInvoice(invoice string) () {
 	requestGateway.AddParameter("invoice_number", invoice)
 }
 
-func (requestGateway *gateway) AddClientRef(ref string) () {
+func (requestGateway *Transaction) AddClientRef(ref string) () {
 	requestGateway.AddParameter("client_reference_number", ref)
 }
 
-func (requestGateway *gateway) AddAmount(amount string) () {
+func (requestGateway *Transaction) AddAmount(amount string) () {
 	requestGateway.AddParameter("transaction_amount", amount)
 }
 
-func (requestGateway *gateway) AddTranId(tranId string) () {
+func (requestGateway *Transaction) AddTranId(tranId string) () {
 	requestGateway.AddParameter("transaction_id", tranId)
 }
 
-func (requestGateway *gateway) Run() (parsedResponse *response, err error) {
+func (requestGateway *Transaction) Run() (*response, error) {
 	requestGateway.RLock()
 	host := requestGateway.hostUrl
 	postURL := requestGateway.RequestString()
 	requestGateway.RUnlock()
 	httpInstance := libHTTP{}
 	httpInstance.Init(host, postURL)
+	parsedResponse := response{}
 	rawResponse, err := httpInstance.Run()
-	if err == nil {
-		return
+	if err != nil {
+		return &parsedResponse, err
 	}
-	return parsedResponse.Init(rawResponse), err
+	parsedResponse.Init(rawResponse)
+	return &parsedResponse, err
 }
 
 func (httpSender *libHTTP) Init(urlString string, requestString string) () {
@@ -157,11 +160,11 @@ func (httpSender *libHTTP) Run() (string, error) {
 	r.Header.Add("Content-Length", strconv.Itoa(len(req)))
 
 
-	response, err := client.Do(r)
+	responseData, err := client.Do(r)
 
 	defer r.Body.Close()
-	if response.StatusCode == 200 {
-		bodyBytes, err := ioutil.ReadAll(response.Body)
+	if responseData.StatusCode == 200 {
+		bodyBytes, err := ioutil.ReadAll(responseData.Body)
 		if err != nil {
 			return "", err
 		}
@@ -170,7 +173,7 @@ func (httpSender *libHTTP) Run() (string, error) {
 	return "", err
 }
 
-func ( *response) Init(responseString string) (gatewayResponse *response) {
+func (gatewayResponse *response) Init(responseString string) (*response) {
 	gatewayResponse.Lock()
 	gatewayResponse.responseList = make(map[string]string, 0)
 	pairs := strings.Split(responseString, "&")
